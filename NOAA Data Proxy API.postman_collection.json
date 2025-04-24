@@ -1,0 +1,145 @@
+{
+	"info": {
+		"_postman_id": "3c0f7484-19de-4bab-ad9c-c6e189c2a7b9",
+		"name": "NOAA Data Proxy API",
+		"description": "Collection for testing the NOAA Data Proxy API endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "24393444"
+	},
+	"item": [
+		{
+			"name": "Get NOAA Data",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/logs",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"logs"
+					],
+					"query": [
+						{
+							"key": "datasetid",
+							"value": "GHCND",
+							"disabled": true
+						},
+						{
+							"key": "startdate",
+							"value": "2023-01-01",
+							"disabled": true
+						},
+						{
+							"key": "enddate",
+							"value": "2023-01-31",
+							"disabled": true
+						},
+						{
+							"key": "limit",
+							"value": "25",
+							"disabled": true
+						}
+					]
+				},
+				"description": "Fetch NOAA data for a specific date range"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Logs",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}?datasetid=GHCND&startdate=2023-01-01&enddate=2023-01-31&limit=25",
+					"host": [
+						"{{base_url}}"
+					],
+					"query": [
+						{
+							"key": "datasetid",
+							"value": "GHCND"
+						},
+						{
+							"key": "startdate",
+							"value": "2023-01-01"
+						},
+						{
+							"key": "enddate",
+							"value": "2023-01-31"
+						},
+						{
+							"key": "limit",
+							"value": "25"
+						}
+					]
+				},
+				"description": "Retrieve request logs with optional filters"
+			},
+			"response": []
+		},
+		{
+			"name": "New Request",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/users",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"users"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://3.149.231.5:8000",
+			"type": "string"
+		},
+		{
+			"key": "api_key",
+			"value": "your-api-key-here",
+			"type": "string"
+		}
+	]
+}
