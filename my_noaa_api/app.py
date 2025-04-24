@@ -121,7 +121,7 @@ def trigger_airflow(datasetid: str, startdate: str, enddate: str, limit: int = 1
 
 def execute_schema_sql():
     """
-    Execute SQL statements from RDS_schema_code to set up the database schema.
+    Execute SQL statements from all SQL files in the RDS_schema_code directory.
     This function should be called once during setup.
     """
     try:
@@ -129,21 +129,33 @@ def execute_schema_sql():
         conn = get_db_conn()
         cursor = conn.cursor()
         
-        # Read and execute SQL statements
-        with open('RDS_schema_code.sql', 'r') as file:
-            sql_statements = file.read()
-            
-        # Split SQL statements by semicolon
-        statements = sql_statements.split(';')
+        # Get list of SQL files in RDS_schema_code directory
+        import os
+        schema_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../RDS_schema_code')
+        sql_files = [f for f in os.listdir(schema_dir) if f.endswith('.sql')]
         
-        # Execute each statement
-        for statement in statements:
-            if statement.strip():  # Skip empty statements
-                cursor.execute(statement + ';')
+        # Sort files to ensure consistent execution order
+        sql_files.sort()
+        
+        # Execute SQL from each file
+        for sql_file in sql_files:
+            print(f"Executing SQL from {sql_file}...")
+            file_path = os.path.join(schema_dir, sql_file)
+            
+            with open(file_path, 'r') as file:
+                sql_statements = file.read()
+            
+            # Split SQL statements by semicolon
+            statements = sql_statements.split(';')
+            
+            # Execute each statement
+            for statement in statements:
+                if statement.strip():  # Skip empty statements
+                    cursor.execute(statement + ';')
         
         # Commit the changes
         conn.commit()
-        print("Schema SQL executed successfully")
+        print("All schema SQL files executed successfully")
         
     except Exception as e:
         print(f"Error executing schema SQL: {str(e)}")
