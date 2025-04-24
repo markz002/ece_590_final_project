@@ -16,14 +16,14 @@ API_KEY = os.getenv("API_KEY", "change-me-to-a-secure-key")
 NOAA_TOKEN = os.getenv("NOAA_TOKEN", "change-me-to-noaa-token")
 NOAA_BASE_URL = "https://www.ncei.noaa.gov/cdo-web/api/v2"
 AIRFLOW_URL = os.getenv("AIRFLOW_URL", "http://localhost:8080")
-AIRFLOW_USER = os.getenv("AIRFLOW_USER", "airflow")
-AIRFLOW_PASS = os.getenv("AIRFLOW_PASS", "your-password")
+AIRFLOW_USER = os.getenv("AIRFLOW_USER", "admin")
+AIRFLOW_PASS = os.getenv("AIRFLOW_PASS", "DPWaznMsCWPgAKHp")
 
 DB_CONFIG = {
     "host": "mydatabase.cpeqs8o8koho.us-east-2.rds.amazonaws.com",
     "database": "postgres",
-    "user": "postgre",
-    "password": "590deproject5"
+    "user": "postgres",
+    "password": "590degroup5"
 }
 
 app = FastAPI(title="NOAA Data Proxy API")
