@@ -123,6 +123,7 @@ def execute_schema_sql():
     """
     Execute SQL statements from all SQL files in the RDS_schema_code directory.
     This function should be called once during setup.
+    SQL files will be executed in the specific order: users, logs, metadata
     """
     try:
         # Connect to the database
@@ -132,13 +133,16 @@ def execute_schema_sql():
         # Get list of SQL files in RDS_schema_code directory
         import os
         schema_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../RDS_schema_code')
-        sql_files = [f for f in os.listdir(schema_dir) if f.endswith('.sql')]
         
-        # Sort files to ensure consistent execution order
-        sql_files.sort()
+        # Define the specific order for SQL files
+        sql_files_order = [
+            'create_user_table.sql',
+            'create_logs_table.sql',
+            'create_metadata_table.sql'
+        ]
         
-        # Execute SQL from each file
-        for sql_file in sql_files:
+        # Execute SQL from each file in the specified order
+        for sql_file in sql_files_order:
             print(f"Executing SQL from {sql_file}...")
             file_path = os.path.join(schema_dir, sql_file)
             
@@ -155,7 +159,7 @@ def execute_schema_sql():
         
         # Commit the changes
         conn.commit()
-        print("All schema SQL files executed successfully")
+        print("All schema SQL files executed successfully in order: users, logs, metadata")
         
     except Exception as e:
         print(f"Error executing schema SQL: {str(e)}")
