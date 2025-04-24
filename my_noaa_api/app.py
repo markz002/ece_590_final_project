@@ -9,6 +9,8 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import secrets
+import uuid
 
 # --- Configuration ---
 API_KEY_NAME = "X-API-Key"
@@ -32,6 +34,17 @@ app = FastAPI(title="NOAA Data Proxy API")
 class NOAADataResponse(BaseModel):
     metadata: Dict[str, Any]
     results: List[Dict[str, Any]]
+
+class CreateUserRequest(BaseModel):
+    email: str
+    access_scope: str = Field(default="basic", description="User access level: admin, researcher, or basic")
+
+class CreateUserResponse(BaseModel):
+    user_id: str
+    email: str
+    api_key: str
+    access_scope: str
+    created_at: datetime
 
 # --- Dependencies ---
 def get_db_conn():
@@ -204,6 +217,55 @@ async def get_noaa_data(
     })
     trigger_airflow(datasetid, startdate, enddate, limit)
     return data
+
+@app.post("/users", response_model=CreateUserResponse)
+async def create_user(user_data: CreateUserRequest):
+    """
+    Create a new user with a randomly generated API key.
+    
+    Returns:
+        user_id: UUID of the created user
+        email: User's email address
+        api_key: Generated API key
+        access_scope: User's access level
+        created_at: Timestamp of user creation
+    """
+    try:
+        # Generate a secure random API key
+        api_key = secrets.token_urlsafe(32)
+        
+        # Connect to database
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        
+        # Insert new user
+        cursor.execute("""
+            INSERT INTO users (email, api_key, access_scope)
+            VALUES (%s, %s, %s)
+            RETURNING id, email, access_scope, created_at
+        """, (user_data.email, api_key, user_data.access_scope))
+        
+        # Get the created user data
+        result = cursor.fetchone()
+        
+        # Commit the transaction
+        conn.commit()
+        
+        # Return response with the generated API key
+        return {
+            "user_id": str(result[0]),
+            "email": result[1],
+            "api_key": api_key,
+            "access_scope": result[2],
+            "created_at": result[3]
+        }
+        
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.get("/logs")
 async def get_logs(
