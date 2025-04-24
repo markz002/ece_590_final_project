@@ -119,6 +119,40 @@ def trigger_airflow(datasetid: str, startdate: str, enddate: str, limit: int = 1
     if response.status_code != 200:
         raise HTTPException(status_code=500, detail=f"Airflow trigger failed: {response.text}")
 
+def execute_schema_sql():
+    """
+    Execute SQL statements from RDS_schema_code to set up the database schema.
+    This function should be called once during setup.
+    """
+    try:
+        # Connect to the database
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        
+        # Read and execute SQL statements
+        with open('RDS_schema_code.sql', 'r') as file:
+            sql_statements = file.read()
+            
+        # Split SQL statements by semicolon
+        statements = sql_statements.split(';')
+        
+        # Execute each statement
+        for statement in statements:
+            if statement.strip():  # Skip empty statements
+                cursor.execute(statement + ';')
+        
+        # Commit the changes
+        conn.commit()
+        print("Schema SQL executed successfully")
+        
+    except Exception as e:
+        print(f"Error executing schema SQL: {str(e)}")
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
 # --- Exception Handlers ---
 @app.exception_handler(HTTPException)
 async def custom_http_exception_handler(request, exc):
@@ -206,4 +240,17 @@ async def get_logs(
 
 if __name__ == "__main__":
     import uvicorn
+    import argparse
+    
+    # Create argument parser
+    parser = argparse.ArgumentParser(description='NOAA Data Proxy API')
+    parser.add_argument('--setup-db', action='store_true',
+                      help='Execute database schema setup before starting the server')
+    args = parser.parse_args()
+    
+    # Execute schema SQL if requested
+    if args.setup_db:
+        execute_schema_sql()
+    
+    # Start the FastAPI server
     uvicorn.run(app, host="0.0.0.0", port=8000)
