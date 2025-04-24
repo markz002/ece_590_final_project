@@ -1,0 +1,94 @@
+{
+    "info": {
+        "_postman_id": "unique-id",
+        "name": "NOAA Data Proxy API",
+        "description": "Collection for testing the NOAA Data Proxy API endpoints",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://3.149.231.5",
+            "type": "string",
+            "description": "Base URL for API endpoints"
+        },
+        {
+            "key": "api_key",
+            "value": "your-api-key-here",
+            "type": "string",
+            "description": "API Key for authentication"
+        }
+    ],
+    "item": [
+        {
+            "name": "Get NOAA Data",
+            "request": {
+                "method": "GET",
+                "header": [
+                    {
+                        "key": "X-API-Key",
+                        "value": "{{api_key}}"
+                    }
+                ],
+                "url": {
+                    "raw": "{{base_url}}/noaa/data",
+                    "query": [
+                        {
+                            "key": "datasetid",
+                            "value": "GHCND"
+                        },
+                        {
+                            "key": "startdate",
+                            "value": "2023-01-01"
+                        },
+                        {
+                            "key": "enddate",
+                            "value": "2023-01-31"
+                        },
+                        {
+                            "key": "limit",
+                            "value": "25"
+                        }
+                    ]
+                },
+                "description": "Fetch NOAA data for a specific date range"
+            },
+            "response": []
+        },
+        {
+            "name": "Get Logs",
+            "request": {
+                "method": "GET",
+                "header": [
+                    {
+                        "key": "X-API-Key",
+                        "value": "{{api_key}}"
+                    }
+                ],
+                "url": {
+                    "raw": "{{base_url}}/logs",
+                    "query": [
+                        {
+                            "key": "user_id",
+                            "value": "1"
+                        },
+                        {
+                            "key": "request_type",
+                            "value": "/noaa/data"
+                        },
+                        {
+                            "key": "start",
+                            "value": "2023-01-01T00:00:00"
+                        },
+                        {
+                            "key": "end",
+                            "value": "2023-01-31T23:59:59"
+                        }
+                    ]
+                },
+                "description": "Retrieve request logs with optional filters"
+            },
+            "response": []
+        }
+    ]
+}
