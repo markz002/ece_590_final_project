@@ -6,5 +6,3 @@ CREATE TABLE logs (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     payload JSONB
 );
-
--- Tracks requests made to the API for auditing/debugging purposes.

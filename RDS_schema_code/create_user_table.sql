@@ -5,5 +5,3 @@ CREATE TABLE users (
     access_scope TEXT NOT NULL DEFAULT 'basic', -- e.g., 'admin', 'researcher', 'basic'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
---  Stores API users and their roles/access control levels.

@@ -12,7 +12,7 @@ from datetime import datetime
 
 # --- Configuration ---
 API_KEY_NAME = "X-API-Key"
-API_KEY = os.getenv("API_KEY", "change-me-to-a-secure-key")
+API_KEY = os.getenv("API_KEY", "your-api-key")
 NOAA_TOKEN = os.getenv("NOAA_TOKEN", "change-me-to-noaa-token")
 NOAA_BASE_URL = "https://www.ncei.noaa.gov/cdo-web/api/v2"
 AIRFLOW_URL = os.getenv("AIRFLOW_URL", "http://localhost:8080")
@@ -145,9 +145,10 @@ def execute_schema_sql():
         for sql_file in sql_files_order:
             print(f"Executing SQL from {sql_file}...")
             file_path = os.path.join(schema_dir, sql_file)
-            
+
             with open(file_path, 'r') as file:
                 sql_statements = file.read()
+                print(f"SQL statements from {sql_file}: {sql_statements}")
             
             # Split SQL statements by semicolon
             statements = sql_statements.split(';')
