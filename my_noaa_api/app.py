@@ -11,6 +11,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import secrets
 import uuid
+from pystac_client import Client
+from planetary_computer import sign
 
 # --- Configuration ---
 API_KEY_NAME = "X-API-Key"
@@ -45,6 +47,15 @@ class CreateUserResponse(BaseModel):
     api_key: str
     access_scope: str
     created_at: datetime
+
+class LandsatScene(BaseModel):
+    id: str
+    properties: Dict[str, Any]
+    assets: Dict[str, str]
+
+class LandsatSearchResponse(BaseModel):
+    scenes: List[LandsatScene]
+    total_count: int
 
 # --- Dependencies ---
 def get_db_conn():
@@ -182,6 +193,8 @@ def execute_schema_sql():
     finally:
         cursor.close()
         conn.close()
+        
+
 
 # --- Exception Handlers ---
 @app.exception_handler(HTTPException)
@@ -231,12 +244,24 @@ async def create_user(user_data: CreateUserRequest):
         created_at: Timestamp of user creation
     """
     try:
-        # Generate a secure random API key
-        api_key = secrets.token_urlsafe(32)
-        
-        # Connect to database
+        # First check if user already exists
         conn = get_db_conn()
         cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE email = %s", (user_data.email,))
+        existing_user = cursor.fetchone()
+        
+        if existing_user:
+            # If user exists, return their information
+            return CreateUserResponse(
+                user_id=existing_user[0],
+                email=existing_user[1],
+                api_key=existing_user[2],
+                access_scope=existing_user[3],
+                created_at=existing_user[4]
+            )
+        
+        # Generate a secure random API key
+        api_key = secrets.token_urlsafe(32)
         
         # Insert new user
         cursor.execute("""
@@ -296,6 +321,47 @@ async def get_logs(
     cursor.close()
     conn.close()
     return rows
+
+@app.get("/landsat/search", response_model=LandsatSearchResponse)
+async def search_landsat(
+    path: str = Query(..., description="WRS-2 path number"),
+    row: str = Query(..., description="WRS-2 row number"),
+    start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
+    collection: str = Query("landsat-c2-l2", description="STAC collection name"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of items to return"),
+    user=Depends(verify_api_key)
+):
+    """
+    Search for Landsat scenes based on path/row and date range.
+    """
+    try:
+        catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1")
+        
+        search = catalog.search(
+            collections=[collection],
+            query={
+                "landsat:wrs_path": {"eq": int(path)},
+                "landsat:wrs_row": {"eq": int(row)}
+            },
+            datetime=f"{start_date}/{end_date}",
+            limit=limit
+        )
+        
+        scenes = []
+        for item in search.get_items():
+            signed_item = sign(item)
+            scene = {
+                "id": item.id,
+                "properties": dict(item.properties.items()),
+                "assets": {key: asset.href for key, asset in signed_item.assets.items()}
+            }
+            scenes.append(LandsatScene(**scene))
+        
+        return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error searching Landsat scenes: {str(e)}")
 
 # updated by Mark 4/21
 

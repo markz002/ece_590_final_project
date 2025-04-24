@@ -106,6 +106,62 @@
 				}
 			},
 			"response": []
+		},
+		{
+			"name": "Search Landsat Scenes",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/landsat/search",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"landsat",
+						"search"
+					],
+					"query": [
+						{
+							"key": "path",
+							"value": "23",
+							"description": "WRS-2 path number"
+						},
+						{
+							"key": "row",
+							"value": "34",
+							"description": "WRS-2 row number"
+						},
+						{
+							"key": "start_date",
+							"value": "2023-01-01",
+							"description": "Start date in YYYY-MM-DD format"
+						},
+						{
+							"key": "end_date",
+							"value": "2023-12-31",
+							"description": "End date in YYYY-MM-DD format"
+						},
+						{
+							"key": "collection",
+							"value": "landsat-c2-l2",
+							"description": "STAC collection name"
+						},
+						{
+							"key": "limit",
+							"value": "100",
+							"description": "Maximum number of items to return"
+						}
+					]
+				},
+				"description": "Search for Landsat scenes based on path/row and date range"
+			},
+			"response": []
 		}
 	],
 	"event": [
