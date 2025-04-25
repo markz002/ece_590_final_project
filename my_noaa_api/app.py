@@ -72,8 +72,11 @@ def get_user_info(api_key: str):
         raise HTTPException(status_code=401, detail="Unauthorized: invalid API Key")
     return user
 
-async def verify_api_key(x_api_key: str = Header(..., alias=API_KEY_NAME)):
-    return get_user_info(x_api_key)
+# --- DEVELOPMENT OVERRIDE: Disable API key check ---
+async def verify_api_key(x_api_key: str = None):
+    # return get_user_info(x_api_key)
+    # In development, skip actual API key checking and return a dummy user dict
+    return {"id": "dev-user", "role": "developer"}
 
 # --- Helpers ---
 def fetch_noaa_data(datasetid: str, startdate: str, enddate: str, limit: int = 25) -> Dict[str, Any]:
@@ -363,6 +366,48 @@ async def search_landsat(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching Landsat scenes: {str(e)}")
 
+
+from Landsat_s3 import process_scene_assets
+
+@app.post("/landsat/request", response_model=LandsatSearchResponse)
+async def landsat_request(
+    path: str = Query(..., description="WRS-2 path number"),
+    row: str = Query(..., description="WRS-2 row number"),
+    start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
+    collection: str = Query("landsat-c2-l2", description="STAC collection name"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of items to return"),
+    user=Depends(verify_api_key)
+):
+    """
+    Search for Landsat scenes and upload their assets to S3.
+    """
+    try:
+        # Search logic (reuse from search_landsat)
+        catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1")
+        search = catalog.search(
+            collections=[collection],
+            query={
+                "landsat:wrs_path": {"eq": int(path)},
+                "landsat:wrs_row": {"eq": int(row)}
+            },
+            datetime=f"{start_date}/{end_date}",
+            limit=limit
+        )
+        scenes = []
+        for item in search.get_items():
+            signed_item = sign(item)
+            scene = {
+                "id": item.id,
+                "properties": dict(item.properties.items()),
+                "assets": {key: asset.href for key, asset in signed_item.assets.items()}
+            }
+            # Upload all assets for this scene to S3
+            process_scene_assets(scene)
+            scenes.append(LandsatScene(**scene))
+        return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error searching or uploading Landsat scenes: {str(e)}")
 # updated by Mark 4/21
 
 # FastAPI code for the NOAA proxy has now been upgraded to include:
