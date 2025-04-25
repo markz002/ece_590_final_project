@@ -165,9 +165,10 @@ def execute_schema_sql():
         
         # Define the specific order for SQL files
         sql_files_order = [
-            'create_user_table.sql',
-            'create_logs_table.sql',
-            'create_metadata_table.sql'
+            # 'create_user_table.sql',
+            # 'create_logs_table.sql',
+            # 'create_metadata_table.sql',
+            'create_meta_landsat.sql'
         ]
         
         # Execute SQL from each file in the specified order
@@ -199,6 +200,56 @@ def execute_schema_sql():
         cursor.close()
         conn.close()
         
+
+def parse_scene_id(scene_id: str) -> dict:
+    parts = scene_id.split("_")
+    if len(parts) != 6:
+        raise ValueError(f"Invalid Landsat scene ID format: {scene_id}")
+    
+    return {
+        "scene_id": scene_id,
+        "satellite": parts[0],
+        "processing_level": parts[1],
+        "wrs_path": parts[2][:3],
+        "wrs_row": parts[2][3:],
+        "acquisition_date": datetime.strptime(parts[3], "%Y%m%d").date(),
+        "processing_version": parts[4],
+        "data_category": parts[5]
+    }
+
+
+def save_landsat_scene(parsed: Dict[str, Any]) -> bool:
+    conn = None
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO landsat_scenes (
+                scene_id, satellite, processing_level,
+                wrs_path, wrs_row, acquisition_date,
+                processing_version, data_category
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (scene_id) DO NOTHING
+        """, (
+            parsed["scene_id"], parsed["satellite"], parsed["processing_level"],
+            parsed["wrs_path"], parsed["wrs_row"], parsed["acquisition_date"],
+            parsed["processing_version"], parsed["data_category"]
+        ))
+        
+        conn.commit()
+        return cursor.rowcount > 0  # True if inserted
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"Error inserting Landsat scene: {str(e)}")
+        return False
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
 
 
 # --- Exception Handlers ---
@@ -361,6 +412,12 @@ async def search_landsat(
                 "properties": dict(item.properties.items()),
                 "assets": {key: asset.href for key, asset in signed_item.assets.items()}
             }
+            try:
+                parsed = parse_scene_id(item.id)
+                save_landsat_scene(parsed)
+            except Exception as e: #add
+                print(f"Failed to save scene {item.id}: {str(e)}")
+    
             scenes.append(LandsatScene(**scene))
         
         return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
