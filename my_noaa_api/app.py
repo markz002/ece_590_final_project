@@ -13,6 +13,8 @@ import secrets
 import uuid
 from pystac_client import Client
 from planetary_computer import sign
+from tqdm import tqdm
+import asyncio
 
 # --- Configuration ---
 API_KEY_NAME = "X-API-Key"
@@ -395,16 +397,27 @@ async def landsat_request(
             limit=limit
         )
         scenes = []
-        for item in search.get_items():
+        # total number of scenes
+        total_count = len(list(search.get_items()))
+        print(f"Total number of scenes: {total_count}")
+        
+        # Prepare all scenes
+        items = list(search.get_items())
+        scene_dicts = []
+        for item in items:
             signed_item = sign(item)
             scene = {
                 "id": item.id,
                 "properties": dict(item.properties.items()),
                 "assets": {key: asset.href for key, asset in signed_item.assets.items()}
             }
-            # Upload all assets for this scene to S3
-            process_scene_assets(scene)
-            scenes.append(LandsatScene(**scene))
+            scene_dicts.append(scene)
+        
+        # Parallelize uploads using asyncio.to_thread
+        import asyncio
+        await asyncio.gather(*(asyncio.to_thread(process_scene_assets, scene) for scene in scene_dicts))
+        
+        scenes = [LandsatScene(**scene) for scene in scene_dicts]
         return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching or uploading Landsat scenes: {str(e)}")

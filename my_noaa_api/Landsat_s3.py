@@ -38,8 +38,10 @@ def upload_to_s3_from_url(url: str, s3_key: str) -> None:
                 Key=s3_key
             )
         print(f"✅ 成功上传到 s3://{S3_BUCKET}/{s3_key}")
+        return True
     except Exception as e:
         print(f"❌ 上传失败 {url}: {str(e)}")
+        return False
 
 def process_scene_assets(scene: Dict[str, Any]) -> None:
     """处理单个场景的所有资产"""
