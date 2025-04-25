@@ -1,4 +1,6 @@
-CREATE TABLE metadata (
+drop table if exists metadata;
+
+CREATE TABLE IF NOT EXISTS metadata (
     id SERIAL PRIMARY KEY,
     dataset TEXT NOT NULL, -- e.g., 'NOAA'
     metadata JSONB NOT NULL,

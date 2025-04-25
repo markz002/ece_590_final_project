@@ -1,3 +1,5 @@
+drop table if EXISTS logs cascade;
+
 CREATE TABLE logs (
     id SERIAL PRIMARY KEY,
     user_id UUID REFERENCES users(id),
