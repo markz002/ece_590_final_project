@@ -202,6 +202,40 @@ def execute_schema_sql():
         conn.close()
         
 
+def scene_exists(scene_id: str) -> bool:
+    conn = None
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM landsat_scenes WHERE scene_id = %s LIMIT 1", (scene_id,))
+        exists = cursor.fetchone() is not None
+        return exists
+    except Exception as e:
+        print(f"❌ Error checking scene existence {scene_id}: {str(e)}")
+        return False
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
+def scene_exists(scene_id: str) -> bool:
+    conn = None
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM landsat_scenes WHERE scene_id = %s LIMIT 1", (scene_id,))
+        exists = cursor.fetchone() is not None
+        return exists
+    except Exception as e:
+        print(f"❌ Error checking scene existence {scene_id}: {str(e)}")
+        return False
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+
+
 def parse_scene_id(scene_id: str) -> dict:
     parts = scene_id.split("_")
     if len(parts) != 6:
@@ -472,6 +506,10 @@ async def search_landsat(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching Landsat scenes: {str(e)}")
 
+
+
+from Landsat_s3 import process_scene_assets
+
 @app.post("/landsat/request", response_model=LandsatSearchResponse)
 async def landsat_request(
     min_lon: float = Query(None, description="Minimum longitude (west)"),
@@ -494,53 +532,58 @@ async def landsat_request(
         inserted_count = 0
         skipped_count = 0
         catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1")
-        # Mode 1: bbox
-        if None not in (min_lon, min_lat, max_lon, max_lat):
-            bbox = [min_lon, min_lat, max_lon, max_lat]
-            search = catalog.search(
-                collections=[collection],
-                bbox=bbox,
-                datetime=f"{start_date}/{end_date}",
-                limit=limit
-            )
-            items = list(search.get_items())
-        # Mode 2: path/row
-        elif path is not None and row is not None:
-            search = catalog.search(
-                collections=[collection],
-                query={
-                    "landsat:wrs_path": {"eq": int(path)},
-                    "landsat:wrs_row": {"eq": int(row)}
-                },
-                datetime=f"{start_date}/{end_date}",
-                limit=limit
-            )
-            items = list(search.get_items())
-        else:
-            raise HTTPException(status_code=400, detail="You must provide either min_lon, min_lat, max_lon, max_lat or both path and row.")
+        search = catalog.search(
+            collections=[collection],
+            query={
+                "landsat:wrs_path": {"eq": int(path)},
+                "landsat:wrs_row": {"eq": int(row)}
+            },
+            datetime=f"{start_date}/{end_date}",
+            limit=limit
+        )
+        scenes = []
+        inserted_count = 0
+        skipped_count = 0
+
+        items = list(search.get_items())
+        total_count = len(items)
+        print(f"Total number of scenes: {total_count}")
+
+        scene_dicts = []
+
         for item in items:
+            scene_id = item.id
+
+            # 🌟 先查数据库，判断是否存在
+            if scene_exists(scene_id):
+                print(f"⚡ Scene {scene_id} already exists, skipping upload and save.")
+                skipped_count += 1
+                continue  # 直接跳过，不上传，不插入！
+
             signed_item = sign(item)
             scene = {
                 "id": item.id,
                 "properties": dict(item.properties.items()),
                 "assets": {key: asset.href for key, asset in signed_item.assets.items()}
             }
-            all_scene_dicts.append(scene)
+
             try:
-                parsed = parse_scene_id(item.id)
-                inserted = save_landsat_scene(parsed)
-                if inserted:
-                    inserted_count += 1
-                else:
-                    skipped_count += 1
+                parsed = parse_scene_id(scene_id)
+                save_landsat_scene(parsed)  # 插入 landsat_scenes
+                inserted_count += 1
+                scene_dicts.append(scene)  # 🌟 只把新scene放入 scene_dicts
             except Exception as e:
-                print(f"Failed to save scene {item.id}: {str(e)}")
-        # Parallelize uploads using asyncio.to_thread
+                print(f"❌ Failed to save scene {scene_id}: {str(e)}")
+        
+        # 🌟 只处理新插入的 scene_dicts
         import asyncio
-        await asyncio.gather(*(asyncio.to_thread(process_scene_assets, scene) for scene in all_scene_dicts))
-        print(f" Landsat request completed: {inserted_count} scenes inserted, {skipped_count} scenes skipped.")
-        scenes = [LandsatScene(**scene) for scene in all_scene_dicts]
+        await asyncio.gather(*(asyncio.to_thread(process_scene_assets, scene) for scene in scene_dicts))
+
+        print(f"🌟 Landsat request completed: {inserted_count} scenes inserted and uploaded, {skipped_count} scenes skipped.")
+
+        scenes = [LandsatScene(**scene) for scene in scene_dicts]
         return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching or uploading Landsat scenes: {str(e)}")
 
