@@ -4,10 +4,23 @@ from pystac_client import Client
 from typing import List, Dict, Any
 from datetime import datetime
 import requests
+import psycopg2
+
 
 # S3配置（建议使用环境变量或IAM角色）
 S3_BUCKET = "590debucket"
 S3_PREFIX = "landsat_scenes"  # S3存储前缀
+
+def get_db_conn():
+    return psycopg2.connect(**DB_CONFIG)
+
+DB_CONFIG = {
+    "host": "mydatabase.cpeqs8o8koho.us-east-2.rds.amazonaws.com",
+    "database": "postgres",
+    "user": "postgres",
+    "password": "590degroup5"
+}
+
 
 def get_landsat_scenes(path: str, row: str, start_date: str = "2016-01-01", 
                       end_date: str = "2016-12-31", collection: str = "landsat-c2-l2", 
@@ -43,15 +56,52 @@ def upload_to_s3_from_url(url: str, s3_key: str) -> None:
         print(f"❌ 上传失败 {url}: {str(e)}")
         return False
 
+
+def update_landsat_s3link(scene_id: str, s3link: str) -> None:
+    conn = None
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE landsat_scenes
+            SET s3link = %s
+            WHERE scene_id = %s
+        """, (s3link, scene_id))
+        conn.commit()
+        print(f"🔗 Updated s3link for scene {scene_id}")
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"❌ Error updating s3link for {scene_id}: {str(e)}")
+    finally:
+        if conn:
+            cursor.close()
+            conn.close()
+    
+
+
 def process_scene_assets(scene: Dict[str, Any]) -> None:
-    """处理单个场景的所有资产"""
+    """处理单个场景的所有资产并更新主s3link"""
     scene_id = scene["id"]
     acquisition_date = scene["properties"]["datetime"].split("T")[0]
     
+    updated = False  # 控制只更新一次 s3link
+
     for band, url in scene["assets"].items():
         # 生成S3路径示例: landsat_scenes/path200/row115/2016-06-01/LC08_L2SP_200115_B1.TIF
         s3_key = f"{S3_PREFIX}/path{scene['properties']['landsat:wrs_path']}/row{scene['properties']['landsat:wrs_row']}/{acquisition_date}/{scene_id}_{band}.TIF"
-        upload_to_s3_from_url(url, s3_key)
+        
+        s3_link = upload_to_s3_from_url(url, s3_key)
+        
+        if s3_link:
+            print(f"Uploaded {band} for scene {scene_id} -> {s3_key}")
+            
+            if not updated:
+                update_landsat_s3link(scene_id, s3_key)
+                updated = True
+
+
+    
 
 if __name__ == "__main__":
     # 示例：搜索并下载2016年Path 200/Row 115的数据

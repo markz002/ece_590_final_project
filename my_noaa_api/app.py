@@ -13,7 +13,6 @@ import secrets
 import uuid
 from pystac_client import Client
 from planetary_computer import sign
-from tqdm import tqdm
 import asyncio
 
 # --- Configuration ---
@@ -214,9 +213,9 @@ def parse_scene_id(scene_id: str) -> dict:
         "wrs_row": parts[2][3:],
         "acquisition_date": datetime.strptime(parts[3], "%Y%m%d").date(),
         "processing_version": parts[4],
-        "data_category": parts[5]
+        "data_category": parts[5],
+        "s3link": None
     }
-
 
 def save_landsat_scene(parsed: Dict[str, Any]) -> bool:
     conn = None
@@ -228,27 +227,43 @@ def save_landsat_scene(parsed: Dict[str, Any]) -> bool:
             INSERT INTO landsat_scenes (
                 scene_id, satellite, processing_level,
                 wrs_path, wrs_row, acquisition_date,
-                processing_version, data_category
+                processing_version, data_category,
+                s3link
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (scene_id) DO NOTHING
         """, (
-            parsed["scene_id"], parsed["satellite"], parsed["processing_level"],
-            parsed["wrs_path"], parsed["wrs_row"], parsed["acquisition_date"],
-            parsed["processing_version"], parsed["data_category"]
+            parsed["scene_id"],
+            parsed["satellite"],
+            parsed["processing_level"],
+            parsed["wrs_path"],
+            parsed["wrs_row"],
+            parsed["acquisition_date"],
+            parsed["processing_version"],
+            parsed["data_category"],
+            parsed.get("s3link", None) 
         ))
         
         conn.commit()
-        return cursor.rowcount > 0  # True if inserted
+        
+        if cursor.rowcount > 0:
+            print(f" Inserted scene: {parsed['scene_id']}")
+            return True
+        else:
+            print(f" Skipped existing scene: {parsed['scene_id']}")
+            return False
+
     except Exception as e:
         if conn:
             conn.rollback()
-        print(f"Error inserting Landsat scene: {str(e)}")
+        print(f" Error inserting Landsat scene {parsed.get('scene_id', 'Unknown')}: {str(e)}")
         return False
     finally:
         if conn:
             cursor.close()
             conn.close()
+
+
 
 
 
@@ -412,11 +427,6 @@ async def search_landsat(
                 "properties": dict(item.properties.items()),
                 "assets": {key: asset.href for key, asset in signed_item.assets.items()}
             }
-            try:
-                parsed = parse_scene_id(item.id)
-                save_landsat_scene(parsed)
-            except Exception as e: #add
-                print(f"Failed to save scene {item.id}: {str(e)}")
     
             scenes.append(LandsatScene(**scene))
         
@@ -454,6 +464,9 @@ async def landsat_request(
             limit=limit
         )
         scenes = []
+        inserted_count = 0  
+        skipped_count = 0  
+
         # total number of scenes
         total_count = len(list(search.get_items()))
         print(f"Total number of scenes: {total_count}")
@@ -469,11 +482,23 @@ async def landsat_request(
                 "assets": {key: asset.href for key, asset in signed_item.assets.items()}
             }
             scene_dicts.append(scene)
+            try:
+                parsed = parse_scene_id(item.id)
+                inserted = save_landsat_scene(parsed)
+                if inserted:
+                    inserted_count += 1
+                else:
+                    skipped_count += 1
+            except Exception as e: 
+                print(f"Failed to save scene {item.id}: {str(e)}")
         
         # Parallelize uploads using asyncio.to_thread
         import asyncio
         await asyncio.gather(*(asyncio.to_thread(process_scene_assets, scene) for scene in scene_dicts))
         
+
+        print(f"🌟 Landsat request completed: {inserted_count} scenes inserted, {skipped_count} scenes skipped.")
+
         scenes = [LandsatScene(**scene) for scene in scene_dicts]
         return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
     except Exception as e:
@@ -495,7 +520,6 @@ async def landsat_request(
 # Airflow trigger
 
 # /logs endpoint in your FastAPI app with filtering support
-
 
 
 if __name__ == "__main__":
