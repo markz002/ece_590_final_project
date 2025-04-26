@@ -3,9 +3,10 @@ from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 from datetime import timedelta
 import os
-import json
 from my_noaa_api.Landsat_s3 import get_landsat_scenes, process_scene_assets
-from my_noaa_api.landsat_metadata_db import exists_metadata, update_metadata_on_s3_success
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '../my_noaa_api'))
+from app import parse_scene_id, save_landsat_scene
 
 # --- Default args for the DAG ---
 default_args = {
@@ -19,7 +20,7 @@ default_args = {
 with DAG(
     dag_id="landsat_request_dag",
     default_args=default_args,
-    description="Landsat Data Ingestion Pipeline",
+    description="Landsat Data Ingestion Pipeline (PostgreSQL)",
     schedule_interval=None,
     start_date=days_ago(1),
     catchup=False,
@@ -37,51 +38,23 @@ with DAG(
         scenes = get_landsat_scenes(path, row, start_date, end_date, collection, limit)
         context["ti"].xcom_push(key="landsat_scenes", value=scenes)
 
-    def lookup_metadata_db(**context):
+    def store_metadata_and_upload(**context):
         scenes = context["ti"].xcom_pull(key="landsat_scenes")
-        filtered = []
+        inserted_count = 0
+        skipped_count = 0
         for scene in scenes:
-            scene_id = scene["id"]
-            for band in scene["assets"]:
-                s3_key = f"landsat_scenes/path{scene['properties']['landsat:wrs_path']}/row{scene['properties']['landsat:wrs_row']}/{scene['properties']['datetime'].split('T')[0]}/{scene_id}_{band}.TIF"
-                if not exists_metadata(scene_id, s3_key):
-                    filtered.append((scene, band, s3_key))
-        context["ti"].xcom_push(key="to_upload", value=filtered)
-
-    def upload_to_s3(**context):
-        to_upload = context["ti"].xcom_pull(key="to_upload")
-        uploaded = []
-        for scene, band, s3_key in to_upload:
-            url = scene["assets"][band]
-            # Use process_scene_assets for full scene upload, but here, upload one asset at a time for tracking
-            from my_noaa_api.Landsat_s3 import upload_to_s3_from_url
-            success = upload_to_s3_from_url(url, s3_key)
-            if success:
-                uploaded.append({
-                    "scene": scene,
-                    "band": band,
-                    "s3_key": s3_key,
-                    "url": url
-                })
-        context["ti"].xcom_push(key="uploaded", value=uploaded)
-
-    def store_metadata(**context):
-        uploaded = context["ti"].xcom_pull(key="uploaded")
-        for item in uploaded:
-            scene = item["scene"]
-            band = item["band"]
-            s3_key = item["s3_key"]
-            acquisition_date = scene["properties"]["datetime"].split("T")[0]
-            metadata = {
-                "scene_id": scene["id"],
-                "satellite": scene["properties"].get("platform"),
-                "wrs_path": scene["properties"]["landsat:wrs_path"],
-                "wrs_row": scene["properties"]["landsat:wrs_row"],
-                "acquisition_date": acquisition_date,
-                "s3_key": s3_key,
-                "s3_url": f"s3://590debucket/{s3_key}"
-            }
-            update_metadata_on_s3_success(metadata)
+            try:
+                parsed = parse_scene_id(scene["id"])
+                inserted = save_landsat_scene(parsed)
+                if inserted:
+                    inserted_count += 1
+                else:
+                    skipped_count += 1
+            except Exception as e:
+                print(f"Failed to save scene {scene['id']}: {str(e)}")
+            # Upload all assets for the scene
+            process_scene_assets(scene)
+        print(f" Landsat DAG: {inserted_count} scenes inserted, {skipped_count} scenes skipped.")
 
     search_task = PythonOperator(
         task_id="search_landsat",
@@ -89,22 +62,10 @@ with DAG(
         provide_context=True
     )
 
-    lookup_task = PythonOperator(
-        task_id="lookup_metadata_db",
-        python_callable=lookup_metadata_db,
+    store_task = PythonOperator(
+        task_id="store_metadata_and_upload",
+        python_callable=store_metadata_and_upload,
         provide_context=True
     )
 
-    upload_task = PythonOperator(
-        task_id="upload_to_s3",
-        python_callable=upload_to_s3,
-        provide_context=True
-    )
-
-    store_metadata_task = PythonOperator(
-        task_id="store_metadata",
-        python_callable=store_metadata,
-        provide_context=True
-    )
-
-    search_task >> lookup_task >> upload_task >> store_metadata_task
+    search_task >> store_task
