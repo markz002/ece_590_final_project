@@ -1,4 +1,4 @@
-drop table if exists metadata;
+
 
 CREATE TABLE IF NOT EXISTS metadata (
     id SERIAL PRIMARY KEY,

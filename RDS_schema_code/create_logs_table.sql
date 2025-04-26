@@ -1,6 +1,4 @@
-drop table if EXISTS logs cascade;
-
-CREATE TABLE logs (
+CREATE TABLE if not exists logs (
     id SERIAL PRIMARY KEY,
     user_id UUID REFERENCES users(id),
     request_type TEXT NOT NULL, -- e.g., "/noaa/data"

@@ -1,6 +1,6 @@
-drop table if exists landsat_scenes;
 
-CREATE TABLE landsat_scenes (
+
+CREATE TABLE if not exists landsat_scenes (
     id SERIAL PRIMARY KEY,
     scene_id TEXT UNIQUE NOT NULL,       -- 原始场景ID，全字符串
     satellite TEXT NOT NULL,             -- LC08

@@ -1,6 +1,6 @@
-drop table if exists users;
 
-CREATE TABLE  users (
+
+CREATE TABLE if not exists users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT UNIQUE NOT NULL,
     api_key TEXT UNIQUE NOT NULL,
