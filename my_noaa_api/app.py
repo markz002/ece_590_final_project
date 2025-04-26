@@ -541,7 +541,6 @@ async def landsat_request(
             datetime=f"{start_date}/{end_date}",
             limit=limit
         )
-        scenes = []
         inserted_count = 0
         skipped_count = 0
 
@@ -549,40 +548,42 @@ async def landsat_request(
         total_count = len(items)
         print(f"Total number of scenes: {total_count}")
 
-        scene_dicts = []
+        scenes = []         # ✅ 这个收集所有搜索到的
+        scenes_to_upload = []  # ✅ 这个只收集需要上传的新的 scene
 
         for item in items:
-            scene_id = item.id
-
-            # 🌟 先查数据库，判断是否存在
-            if scene_exists(scene_id):
-                print(f"⚡ Scene {scene_id} already exists, skipping upload and save.")
-                skipped_count += 1
-                continue  # 直接跳过，不上传，不插入！
-
             signed_item = sign(item)
             scene = {
                 "id": item.id,
                 "properties": dict(item.properties.items()),
                 "assets": {key: asset.href for key, asset in signed_item.assets.items()}
             }
+            scenes.append(scene)   # ✅ 不管是否新scene，全部加到返回列表
+
+            scene_id = item.id
+
+            if scene_exists(scene_id):
+                print(f"⚡ Scene {scene_id} already exists, skipping upload and save.")
+                skipped_count += 1
+                continue  # 不上传，不存数据库，但是加入 scenes
 
             try:
                 parsed = parse_scene_id(scene_id)
-                save_landsat_scene(parsed)  # 插入 landsat_scenes
+                save_landsat_scene(parsed)
                 inserted_count += 1
-                scene_dicts.append(scene)  # 🌟 只把新scene放入 scene_dicts
+                scenes_to_upload.append(scene)  # ✅ 新的scene要处理
             except Exception as e:
                 print(f"❌ Failed to save scene {scene_id}: {str(e)}")
         
-        # 🌟 只处理新插入的 scene_dicts
+        # 🌟 并行上传新的 scenes
         import asyncio
-        await asyncio.gather(*(asyncio.to_thread(process_scene_assets, scene) for scene in scene_dicts))
+        await asyncio.gather(*(asyncio.to_thread(process_scene_assets, scene) for scene in scenes_to_upload))
 
         print(f"🌟 Landsat request completed: {inserted_count} scenes inserted and uploaded, {skipped_count} scenes skipped.")
 
-        scenes = [LandsatScene(**scene) for scene in scene_dicts]
-        return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
+        # ✅ 返回所有 scenes，不管是否新插入
+        scenes_response = [LandsatScene(**scene) for scene in scenes]
+        return LandsatSearchResponse(scenes=scenes_response, total_count=len(scenes_response))
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching or uploading Landsat scenes: {str(e)}")
