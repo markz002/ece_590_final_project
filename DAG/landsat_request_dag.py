@@ -15,8 +15,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../my_noaa_api'))
 from my_noaa_api.app import parse_scene_id, save_landsat_scene
 =======
 sys.path.append(os.path.join(os.path.dirname(__file__), '../my_noaa_api'))
-from app import parse_scene_id, save_landsat_scene
->>>>>>> 5ee880e (airflow dev123 branch)
+from my_noaa_api.app import parse_scene_id, save_landsat_scene
 
 # --- Default args for the DAG ---
 default_args = {
