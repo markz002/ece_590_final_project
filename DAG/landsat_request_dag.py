@@ -5,6 +5,7 @@ from datetime import timedelta
 import os
 from my_noaa_api.Landsat_s3 import get_landsat_scenes, process_scene_assets
 import sys
+from itertools import product
 sys.path.append(os.path.join(os.path.dirname(__file__), '../my_noaa_api'))
 from my_noaa_api.app import parse_scene_id, save_landsat_scene
 
@@ -32,24 +33,49 @@ with dag:
     def search_landsat(**context):
         conf = context["dag_run"].conf
         print(f"[search_landsat] INPUT conf: {conf}")
-        # Set default values for path and row if not provided
-        path = conf.get("path")
-        row = conf.get("row")
-        if path is None or row is None:
-            # Use defaults based on search_landsat_output sample
-            # path=200, row=115 are common in the sample data
-            path = path if path is not None else "200"
-            row = row if row is not None else "115"
+        # Accept either bbox (min_lon, min_lat, max_lon, max_lat) or path/row
+        min_lon = conf.get("min_lon", -122.0)
+        min_lat = conf.get("min_lat", 36.0)
+        max_lon = conf.get("max_lon", -121.0)
+        max_lat = conf.get("max_lat", 37.0)
+        path = conf.get("path", "200")
+        row = conf.get("row", "115")
         start_date = conf.get("start_date", "2016-01-01")
         end_date = conf.get("end_date", "2016-12-31")
         collection = conf.get("collection", "landsat-c2-l2")
         limit = conf.get("limit", 10)
-        scenes = get_landsat_scenes(path, row, start_date, end_date, collection, limit)
-        print(f"[search_landsat] OUTPUT scenes: {scenes}")
-        context["ti"].xcom_push(key="landsat_scenes", value=scenes)
+        all_scenes = []
+        # Prioritize path/row if provided
+        if path is not None and row is not None:
+            scenes = get_landsat_scenes(
+                path=str(path),
+                row=str(row),
+                start_date=start_date,
+                end_date=end_date,
+                collection=collection,
+                limit=limit
+            )
+            all_scenes.extend(scenes)
+        elif None not in (min_lon, min_lat, max_lon, max_lat):
+            # Use bbox search
+            scenes = get_landsat_scenes(
+                min_lon=float(min_lon),
+                min_lat=float(min_lat),
+                max_lon=float(max_lon),
+                max_lat=float(max_lat),
+                start_date=start_date,
+                end_date=end_date,
+                collection=collection,
+                limit=limit
+            )
+            all_scenes.extend(scenes)
+        else:
+            raise ValueError("You must provide either min_lon, min_lat, max_lon, max_lat or both path and row.")
+        print(f"[search_landsat] OUTPUT scenes: {all_scenes}")
+        context["ti"].xcom_push(key="landsat_scenes", value=all_scenes)
 
     def store_metadata_and_upload(**context):
-        scenes = context["ti"].xcom_pull(key="landsat_scenes")
+        scenes = context["ti"].xcom_pull(task_ids="search_landsat", key="landsat_scenes")
         print(f"[store_metadata_and_upload] INPUT scenes: {scenes}")
         if not scenes:
             print("No scenes found in XCom. Skipping metadata storage and upload.")
@@ -59,11 +85,12 @@ with dag:
         for scene in scenes:
             try:
                 parsed = parse_scene_id(scene["id"])
-                inserted = save_landsat_scene(parsed)
-                if inserted:
-                    inserted_count += 1
-                else:
+                # Check for duplicate by metadata (scene_id)
+                if not save_landsat_scene(parsed):
+                    print(f"Duplicate scene, skipping metadata insert: {parsed['scene_id']}")
                     skipped_count += 1
+                    continue
+                inserted_count += 1
             except Exception as e:
                 print(f"Failed to save scene {scene['id']}: {str(e)}")
             # Upload all assets for the scene

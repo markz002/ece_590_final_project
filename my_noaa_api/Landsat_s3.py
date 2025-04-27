@@ -11,8 +11,21 @@ from planetary_computer import sign
 S3_BUCKET = "590debucket"
 S3_PREFIX = "landsat_scenes"  # S3存储前缀
 
+# --- Configure S3 client with short timeouts and retries ---
+s3_config = Config(
+    connect_timeout=5,  # seconds
+    read_timeout=10,    # seconds
+    retries={
+        'max_attempts': 2,  # fail fast
+        'mode': 'standard'
+    }
+)
+s3 = boto3.client("s3", config=s3_config)
+
+
 def get_db_conn():
-    return psycopg2.connect(**DB_CONFIG)
+    # Set connect_timeout for psycopg2 (in seconds)
+    return psycopg2.connect(connect_timeout=5, **DB_CONFIG)
 
 DB_CONFIG = {
     "host": "mydatabase.cpeqs8o8koho.us-east-2.rds.amazonaws.com",
@@ -39,11 +52,12 @@ def get_landsat_scenes(path: str, row: str, start_date: str = "2016-01-01",
         "assets": {key: asset.href for key, asset in sign(item).assets.items()}
     } for item in search.get_items()]
 
+
 def upload_to_s3_from_url(url: str, s3_key: str) -> None:
     """upload to S3"""
-    s3 = boto3.client('s3', config=Config(signature_version='s3v4'))
     try:
-        with requests.get(url, stream=True) as response:
+        # Add a short timeout to requests.get
+        with requests.get(url, stream=True, timeout=10) as response:
             response.raise_for_status()
             s3.upload_fileobj(
                 Fileobj=response.raw,
@@ -77,7 +91,6 @@ def update_landsat_s3link(scene_id: str, s3link: str) -> None:
         if conn:
             cursor.close()
             conn.close()
-    
 
 
 def process_scene_assets(scene: Dict[str, Any]) -> None:
@@ -100,8 +113,6 @@ def process_scene_assets(scene: Dict[str, Any]) -> None:
                 update_landsat_s3link(scene_id, s3_key)
                 updated = True
 
-
-    
 
 if __name__ == "__main__":
     # 示例：搜索并下载2016年Path 200/Row 115的数据

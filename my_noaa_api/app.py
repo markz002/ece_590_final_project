@@ -4,7 +4,7 @@ import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, Header, HTTPException, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
@@ -266,7 +266,6 @@ def save_landsat_scene(parsed: Dict[str, Any]) -> bool:
 
 
 
-
 # --- Exception Handlers ---
 @app.exception_handler(HTTPException)
 async def custom_http_exception_handler(request, exc):
@@ -395,8 +394,12 @@ async def get_logs(
 
 @app.get("/landsat/search", response_model=LandsatSearchResponse)
 async def search_landsat(
-    path: str = Query(..., description="WRS-2 path number"),
-    row: str = Query(..., description="WRS-2 row number"),
+    min_lon: float = Query(None, description="Minimum longitude (west)"),
+    min_lat: float = Query(None, description="Minimum latitude (south)"),
+    max_lon: float = Query(None, description="Maximum longitude (east)"),
+    max_lat: float = Query(None, description="Maximum latitude (north)"),
+    path: str = Query(None, description="WRS-2 path number"),
+    row: str = Query(None, description="WRS-2 row number"),
     start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
     end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
     collection: str = Query("landsat-c2-l2", description="STAC collection name"),
@@ -404,44 +407,51 @@ async def search_landsat(
     user=Depends(verify_api_key)
 ):
     """
-    Search for Landsat scenes based on path/row and date range.
+    Search for Landsat scenes by bounding box or path/row. User must provide either bbox or both path and row.
     """
     try:
         catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1")
-        
-        search = catalog.search(
-            collections=[collection],
-            query={
-                "landsat:wrs_path": {"eq": int(path)},
-                "landsat:wrs_row": {"eq": int(row)}
-            },
-            datetime=f"{start_date}/{end_date}",
-            limit=limit
-        )
-        
-        scenes = []
-        for item in search.get_items():
-            signed_item = sign(item)
-            scene = {
-                "id": item.id,
-                "properties": dict(item.properties.items()),
-                "assets": {key: asset.href for key, asset in signed_item.assets.items()}
-            }
-    
-            scenes.append(LandsatScene(**scene))
-        
+        # Mode 1: bbox
+        if None not in (min_lon, min_lat, max_lon, max_lat):
+            bbox = [min_lon, min_lat, max_lon, max_lat]
+            search = catalog.search(
+                collections=[collection],
+                bbox=bbox,
+                datetime=f"{start_date}/{end_date}",
+                limit=limit
+            )
+            items = list(search.get_items())
+        # Mode 2: path/row
+        elif path is not None and row is not None:
+            search = catalog.search(
+                collections=[collection],
+                query={
+                    "landsat:wrs_path": {"eq": int(path)},
+                    "landsat:wrs_row": {"eq": int(row)}
+                },
+                datetime=f"{start_date}/{end_date}",
+                limit=limit
+            )
+            items = list(search.get_items())
+        else:
+            raise HTTPException(status_code=400, detail="You must provide either min_lon, min_lat, max_lon, max_lat or both path and row.")
+        scenes = [LandsatScene(
+            id=item.id,
+            properties=dict(item.properties.items()),
+            assets={key: asset.href for key, asset in sign(item).assets.items()}
+        ) for item in items]
         return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
-        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching Landsat scenes: {str(e)}")
 
-
-from Landsat_s3 import process_scene_assets
-
 @app.post("/landsat/request", response_model=LandsatSearchResponse)
 async def landsat_request(
-    path: str = Query(..., description="WRS-2 path number"),
-    row: str = Query(..., description="WRS-2 row number"),
+    min_lon: float = Query(None, description="Minimum longitude (west)"),
+    min_lat: float = Query(None, description="Minimum latitude (south)"),
+    max_lon: float = Query(None, description="Maximum longitude (east)"),
+    max_lat: float = Query(None, description="Maximum latitude (north)"),
+    path: str = Query(None, description="WRS-2 path number"),
+    row: str = Query(None, description="WRS-2 row number"),
     start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
     end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
     collection: str = Query("landsat-c2-l2", description="STAC collection name"),
@@ -449,31 +459,37 @@ async def landsat_request(
     user=Depends(verify_api_key)
 ):
     """
-    Search for Landsat scenes and upload their assets to S3.
+    Search for Landsat scenes and upload their assets to S3 for all scenes matching the bounding box or path/row. User must provide either bbox or both path and row.
     """
     try:
-        # Search logic (reuse from search_landsat)
+        all_scene_dicts = []
+        inserted_count = 0
+        skipped_count = 0
         catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1")
-        search = catalog.search(
-            collections=[collection],
-            query={
-                "landsat:wrs_path": {"eq": int(path)},
-                "landsat:wrs_row": {"eq": int(row)}
-            },
-            datetime=f"{start_date}/{end_date}",
-            limit=limit
-        )
-        scenes = []
-        inserted_count = 0  
-        skipped_count = 0  
-
-        # total number of scenes
-        total_count = len(list(search.get_items()))
-        print(f"Total number of scenes: {total_count}")
-        
-        # Prepare all scenes
-        items = list(search.get_items())
-        scene_dicts = []
+        # Mode 1: bbox
+        if None not in (min_lon, min_lat, max_lon, max_lat):
+            bbox = [min_lon, min_lat, max_lon, max_lat]
+            search = catalog.search(
+                collections=[collection],
+                bbox=bbox,
+                datetime=f"{start_date}/{end_date}",
+                limit=limit
+            )
+            items = list(search.get_items())
+        # Mode 2: path/row
+        elif path is not None and row is not None:
+            search = catalog.search(
+                collections=[collection],
+                query={
+                    "landsat:wrs_path": {"eq": int(path)},
+                    "landsat:wrs_row": {"eq": int(row)}
+                },
+                datetime=f"{start_date}/{end_date}",
+                limit=limit
+            )
+            items = list(search.get_items())
+        else:
+            raise HTTPException(status_code=400, detail="You must provide either min_lon, min_lat, max_lon, max_lat or both path and row.")
         for item in items:
             signed_item = sign(item)
             scene = {
@@ -481,7 +497,7 @@ async def landsat_request(
                 "properties": dict(item.properties.items()),
                 "assets": {key: asset.href for key, asset in signed_item.assets.items()}
             }
-            scene_dicts.append(scene)
+            all_scene_dicts.append(scene)
             try:
                 parsed = parse_scene_id(item.id)
                 inserted = save_landsat_scene(parsed)
@@ -489,38 +505,65 @@ async def landsat_request(
                     inserted_count += 1
                 else:
                     skipped_count += 1
-            except Exception as e: 
+            except Exception as e:
                 print(f"Failed to save scene {item.id}: {str(e)}")
-        
         # Parallelize uploads using asyncio.to_thread
         import asyncio
-        await asyncio.gather(*(asyncio.to_thread(process_scene_assets, scene) for scene in scene_dicts))
-        
-
-        print(f"🌟 Landsat request completed: {inserted_count} scenes inserted, {skipped_count} scenes skipped.")
-
-        scenes = [LandsatScene(**scene) for scene in scene_dicts]
+        await asyncio.gather(*(asyncio.to_thread(process_scene_assets, scene) for scene in all_scene_dicts))
+        print(f" Landsat request completed: {inserted_count} scenes inserted, {skipped_count} scenes skipped.")
+        scenes = [LandsatScene(**scene) for scene in all_scene_dicts]
         return LandsatSearchResponse(scenes=scenes, total_count=len(scenes))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching or uploading Landsat scenes: {str(e)}")
-# updated by Mark 4/21
 
-# FastAPI code for the NOAA proxy has now been upgraded to include:
-
-# API key verification with user roles from a PostgreSQL users table
-
-# Request logging to an RDS logs table
-
-# Duplication checks in a metadata table before fetching NOAA data
-
-# Metadata saving after successful fetch
-
-# Detailed exception handling for clearer client feedback
-
-# Airflow trigger
-
-# /logs endpoint in your FastAPI app with filtering support
-
+@app.get("/landsat/retrieve")
+async def landsat_retrieve(
+    min_lon: float = Query(None, description="Minimum longitude (west)"),
+    min_lat: float = Query(None, description="Minimum latitude (south)"),
+    max_lon: float = Query(None, description="Maximum longitude (east)"),
+    max_lat: float = Query(None, description="Maximum latitude (north)"),
+    path: str = Query(None, description="WRS-2 path number"),
+    row: str = Query(None, description="WRS-2 row number"),
+    start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
+    user=Depends(verify_api_key)
+):
+    """
+    Retrieve S3 links for Landsat scenes matching the query from the metadata database. Prioritize path/row if provided, else use bbox. If all scenes are found, redirect to their S3 links (multi-redirect JSON if >1).
+    """
+    from itertools import product
+    conn = get_db_conn()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        scenes = []
+        # Prioritize path/row
+        if path is not None and row is not None:
+            query = """
+                SELECT scene_id, s3link FROM landsat_scenes
+                WHERE wrs_path = %s AND wrs_row = %s
+                AND acquisition_date >= %s AND acquisition_date <= %s
+            """
+            cursor.execute(query, (path, row, start_date, end_date))
+            rows = cursor.fetchall()
+            if not rows:
+                raise HTTPException(status_code=404, detail="No matching scenes found in metadata database.")
+            scenes = rows
+        elif None not in (min_lon, min_lat, max_lon, max_lat):
+            raise HTTPException(status_code=400, detail="BBox search not supported as landsat_scenes table does not have geometry columns.")
+        else:
+            raise HTTPException(status_code=400, detail="You must provide either path/row.")
+        # Check all scenes have s3link
+        missing = [s for s in scenes if not s.get("s3link")]
+        if missing:
+            raise HTTPException(status_code=404, detail="Some scenes are missing S3 links in metadata database.")
+        # Redirect if only one scene, else return JSON with links
+        if len(scenes) == 1:
+            return RedirectResponse(scenes[0]["s3link"])
+        else:
+            return JSONResponse({"scene_links": [{"scene_id": s["scene_id"], "s3link": s["s3link"]} for s in scenes]})
+    finally:
+        cursor.close()
+        conn.close()
 
 if __name__ == "__main__":
     import uvicorn
