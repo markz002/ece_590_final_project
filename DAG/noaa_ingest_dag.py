@@ -1,6 +1,6 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from airflow.utils.dates import days_ago
+import pendulum
 from datetime import timedelta
 import os
 import requests
@@ -28,15 +28,17 @@ default_args = {
 }
 
 # --- DAG definition ---
-with DAG(
+dag = DAG(
     dag_id="noaa_ingest_dag",
     default_args=default_args,
     description="NOAA Data Ingestion Pipeline",
-    schedule_interval=None,
-    start_date=days_ago(1),
+    schedule=None,
+    start_date=pendulum.now().subtract(days=1),
     catchup=False,
     tags=["noaa", "ingestion"],
-) as dag:
+)
+
+with dag:
 
     def fetch_noaa_data(**context):
         conf = context["dag_run"].conf
@@ -92,20 +94,17 @@ with DAG(
 
     fetch_task = PythonOperator(
         task_id="fetch_noaa_data",
-        python_callable=fetch_noaa_data,
-        provide_context=True
+        python_callable=fetch_noaa_data
     )
 
     upload_task = PythonOperator(
         task_id="upload_to_s3",
-        python_callable=upload_to_s3,
-        provide_context=True
+        python_callable=upload_to_s3
     )
 
     save_task = PythonOperator(
         task_id="save_metadata",
-        python_callable=save_metadata,
-        provide_context=True
+        python_callable=save_metadata
     )
 
     fetch_task >> upload_task >> save_task

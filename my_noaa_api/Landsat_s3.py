@@ -5,7 +5,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 import requests
 import psycopg2
-
+from planetary_computer import sign
 
 # S3配置（建议使用环境变量或IAM角色）
 S3_BUCKET = "590debucket"
