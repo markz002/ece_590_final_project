@@ -686,12 +686,14 @@ async def landsat_retrieve(
                 for obj in response["Contents"]:
                     fname = obj["Key"].split("/")[-1]
                     if fname.startswith(scene_id_prefix):
-                        links.append(f"s3://{bucket}/{obj['Key']}")
-            all_scene_links.append({"scene_id": scene_id, "s3links": links, "acquisition_date": prefix.rstrip("/").split("/")[-1]})
+                        # Convert s3:// link to https:// link
+                        http_url = f"https://{bucket}.s3.amazonaws.com/{obj['Key']}"
+                        links.append(http_url)
+            all_scene_links.append({"scene_id": scene_id, "download_links": links, "acquisition_date": prefix.rstrip("/").split("/")[-1]})
 
-        # If only one scene, redirect to the first S3 link (for backward compatibility)
+        # If only one scene, redirect to the first download link (for backward compatibility)
         if len(all_scene_links) == 1:
-            return JSONResponse({"scene_id": all_scene_links[0]["scene_id"], "s3links": all_scene_links[0]["s3links"]})
+            return JSONResponse({"scene_id": all_scene_links[0]["scene_id"], "download_links": all_scene_links[0]["download_links"]})
         else:
             return JSONResponse({"scene_links": all_scene_links})
     finally:
