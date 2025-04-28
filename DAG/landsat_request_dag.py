@@ -6,7 +6,7 @@ import os
 # from my_noaa_api.Landsat_s3 import get_landsat_scenes, process_scene_assets
 import sys
 from itertools import product
-from my_noaa_api.app import parse_scene_id, save_landsat_scene, get_landsat_scenes, process_scene_assets
+from my_noaa_api.app import parse_scene_id, save_landsat_scene, get_landsat_scenes, process_scene_assets, get_landsat_scenes_bbox
 
 # --- Default args for the DAG ---
 default_args = {
@@ -65,7 +65,8 @@ with dag:
             all_scenes.extend(scenes)
         elif None not in (min_lon, min_lat, max_lon, max_lat):
             # Use bbox search
-            scenes = get_landsat_scenes(
+            
+            scenes = get_landsat_scenes_bbox(
                 min_lon=float(min_lon),
                 min_lat=float(min_lat),
                 max_lon=float(max_lon),

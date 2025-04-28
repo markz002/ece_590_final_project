@@ -55,6 +55,22 @@ def get_landsat_scenes(path: str, row: str, start_date: str = "2016-01-01",
     } for item in search.get_items()]
 
 
+def get_landsat_scenes_bbox(min_lon: float, min_lat: float, max_lon: float, max_lat: float, start_date: str = "2016-01-01", end_date: str = "2016-12-31", collection: str = "landsat-c2-l2", limit: int = 100) -> List[Dict[str, Any]]:
+    """Get Landsat scenes using bounding box search and sign URLs."""
+    catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1")
+    search = catalog.search(
+        collections=[collection],
+        bbox=[min_lon, min_lat, max_lon, max_lat],
+        datetime=f"{start_date}/{end_date}",
+        limit=limit
+    )
+    return [{
+        "id": item.id,
+        "properties": dict(item.properties.items()),
+        "assets": {key: asset.href for key, asset in sign(item).assets.items()}
+    } for item in search.get_items()]
+
+
 def upload_to_s3_from_url(url: str, s3_key: str) -> None:
     """upload to S3"""
     try:
