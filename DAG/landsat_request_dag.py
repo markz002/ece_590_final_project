@@ -33,6 +33,7 @@ with dag:
         conf = context["dag_run"].conf
         print(f"[search_landsat] INPUT conf: {conf}")
         # Accept either bbox (min_lon, min_lat, max_lon, max_lat) or path/row
+        bbox = conf.get("bbox")
         min_lon = conf.get("min_lon", -122.0)
         min_lat = conf.get("min_lat", 36.0)
         max_lon = conf.get("max_lon", -121.0)
@@ -44,6 +45,13 @@ with dag:
         collection = conf.get("collection", "landsat-c2-l2")
         limit = conf.get("limit", 10)
         all_scenes = []
+        # If bbox is provided, override min/max lon/lat
+        if bbox:
+            parts = bbox.split(",")
+            if len(parts) == 4:
+                min_lon, min_lat, max_lon, max_lat = map(float, parts)
+            else:
+                raise ValueError("bbox must be in the format 'min_lon,min_lat,max_lon,max_lat'")
         # Prioritize path/row if provided
         if path is not None and row is not None:
             scenes = get_landsat_scenes(

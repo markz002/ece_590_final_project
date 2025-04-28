@@ -484,6 +484,7 @@ async def landsat_request(
     max_lat: float = Query(None, description="Maximum latitude (north)"),
     path: str = Query(None, description="WRS-2 path number"),
     row: str = Query(None, description="WRS-2 row number"),
+    bbox: str = Query(None, description="Bounding box as 'min_lon,min_lat,max_lon,max_lat' (optional, overrides min/max lon/lat)"),
     start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
     end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
     collection: str = Query("landsat-c2-l2", description="STAC collection name"),
@@ -498,6 +499,13 @@ async def landsat_request(
         inserted_count = 0
         skipped_count = 0
         catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1")
+        # If bbox is provided, override min/max lon/lat
+        if bbox:
+            parts = bbox.split(",")
+            if len(parts) == 4:
+                min_lon, min_lat, max_lon, max_lat = map(float, parts)
+            else:
+                raise HTTPException(status_code=400, detail="bbox must be in the format 'min_lon,min_lat,max_lon,max_lat'")
         # Mode 1: bbox
         if None not in (min_lon, min_lat, max_lon, max_lat):
             bbox = [min_lon, min_lat, max_lon, max_lat]
@@ -553,9 +561,10 @@ async def landsat_dag_request(
     min_lon: float = Query(None, description="Minimum longitude (west)"),
     min_lat: float = Query(None, description="Minimum latitude (south)"),
     max_lon: float = Query(None, description="Maximum longitude (east)"),
-    max_lat: float = Query(None, description="Maximum longitude (north)"),
+    max_lat: float = Query(None, description="Maximum latitude (north)"),
     path: str = Query(None, description="WRS-2 path number"),
     row: str = Query(None, description="WRS-2 row number"),
+    bbox: str = Query(None, description="Bounding box as 'min_lon,min_lat,max_lon,max_lat' (optional, overrides min/max lon/lat)"),
     start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
     end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
     collection: str = Query("landsat-c2-l2", description="STAC collection name"),
@@ -568,6 +577,14 @@ async def landsat_dag_request(
     airflow_url = "http://localhost:8080/api/v2/dags/landsat_request_dag/dagRuns"
     now_iso = datetime.now(timezone.utc).isoformat()
     dag_run_id = f"landsat_request_{now_iso}"
+    # If bbox is provided, override min/max lon/lat
+    if bbox:
+        parts = bbox.split(",")
+        if len(parts) == 4:
+            min_lon, min_lat, max_lon, max_lat = map(float, parts)
+        else:
+            raise HTTPException(status_code=400, detail="bbox must be in the format 'min_lon,min_lat,max_lon,max_lat'")
+    # Build payload for Airflow DAG
     payload = {
         "dag_run_id": dag_run_id,
         "logical_date": now_iso,
