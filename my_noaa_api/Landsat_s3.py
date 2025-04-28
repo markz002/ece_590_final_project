@@ -6,6 +6,8 @@ from datetime import datetime
 import requests
 import psycopg2
 from planetary_computer import sign
+import os
+from urllib.parse import urlparse
 
 # S3配置（建议使用环境变量或IAM角色）
 S3_BUCKET = "590debucket"
@@ -101,14 +103,15 @@ def process_scene_assets(scene: Dict[str, Any]) -> None:
     updated = False  # 控制只更新一次 s3link
 
     for band, url in scene["assets"].items():
-        # 生成S3路径示例: landsat_scenes/path200/row115/2016-06-01/LC08_L2SP_200115_B1.TIF
-        s3_key = f"{S3_PREFIX}/path{scene['properties']['landsat:wrs_path']}/row{scene['properties']['landsat:wrs_row']}/{acquisition_date}/{scene_id}_{band}.TIF"
-        
+        # Skip virtual/visualization assets if needed
+        if band.lower() in ["tilejson", "rendered_preview"]:
+            continue
+        # Extract filename from URL (before any query string)
+        filename = os.path.basename(urlparse(url).path)
+        s3_key = f"{S3_PREFIX}/path{scene['properties']['landsat:wrs_path']}/row{scene['properties']['landsat:wrs_row']}/{acquisition_date}/{filename}"
         s3_link = upload_to_s3_from_url(url, s3_key)
-        
         if s3_link:
             print(f"Uploaded {band} for scene {scene_id} -> {s3_key}")
-            
             if not updated:
                 update_landsat_s3link(scene_id, s3_key)
                 updated = True

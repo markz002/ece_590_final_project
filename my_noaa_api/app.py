@@ -15,7 +15,11 @@ from pystac_client import Client
 from planetary_computer import sign
 import asyncio
 from datetime import datetime, timezone
-from Landsat_s3 import process_scene_assets, upload_to_s3_from_url, update_landsat_s3link
+try:
+    from Landsat_s3 import process_scene_assets, upload_to_s3_from_url, update_landsat_s3link, get_landsat_scenes
+except:
+    from my_noaa_api.Landsat_s3 import process_scene_assets, upload_to_s3_from_url, update_landsat_s3link, get_landsat_scenes
+
 
 # --- Configuration ---
 API_KEY_NAME = "X-API-Key"
@@ -584,7 +588,7 @@ async def landsat_dag_request(
     # --- Airflow OAuth2 Token Retrieval ---
     airflow_api_url = os.getenv("AIRFLOW_URL", "http://localhost:8080")
     airflow_user = os.getenv("AIRFLOW_USER", "admin")
-    airflow_pass = os.getenv("AIRFLOW_PASS", "dpRHnfWubMgtZ3F6")
+    airflow_pass = os.getenv("AIRFLOW_PASS", "QVvpRpvEtaXB9ePg")
     token_endpoint = f"{airflow_api_url}/auth/token"
     try:
         token_resp = requests.post(token_endpoint, json={"username": airflow_user, "password": airflow_pass})
@@ -651,11 +655,45 @@ async def landsat_retrieve(
         missing = [s for s in scenes if not s.get("s3link")]
         if missing:
             raise HTTPException(status_code=404, detail="Some scenes are missing S3 links in metadata database.")
-        # Redirect if only one scene, else return JSON with links
-        if len(scenes) == 1:
-            return RedirectResponse(scenes[0]["s3link"])
+        # For each scene, try to enumerate all S3 links using heuristics or external search
+        all_scene_links = []
+        for s in scenes:
+            scene_id = s["scene_id"]
+            s3link = s["s3link"]
+            # Heuristic: Instead of guessing band filenames, enumerate all files in the same S3 directory as the s3link
+            # and return all links that match the Landsat scene_id prefix.
+            import re
+            import boto3
+            from urllib.parse import urlparse
+
+            # Parse S3 link to get bucket and prefix, including acquisition date
+            parsed = urlparse(s3link)
+            print(s3link)
+            bucket = parsed.netloc or "590debucket"
+            # The prefix should include the acquisition date directory
+            # Example: .../path200/row115/2016-06-01/
+            prefix = parsed.path.lstrip("/").rsplit("/", 1)[0] + "/"
+
+            # Try to extract acquisition date from the prefix (assume it's the last part before the filename)
+            # If you want to be more robust, you can also get the date from the database if available
+            scene_id_prefix = s3link.split("/")[-1].split("_")[0]  # e.g. LC08_L2SR_200115_20161225_20201016_02_T2
+
+            # List all objects in the prefix directory
+            s3 = boto3.client("s3")
+            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            links = []
+            if "Contents" in response:
+                for obj in response["Contents"]:
+                    fname = obj["Key"].split("/")[-1]
+                    if fname.startswith(scene_id_prefix):
+                        links.append(f"s3://{bucket}/{obj['Key']}")
+            all_scene_links.append({"scene_id": scene_id, "s3links": links, "acquisition_date": prefix.rstrip("/").split("/")[-1]})
+
+        # If only one scene, redirect to the first S3 link (for backward compatibility)
+        if len(all_scene_links) == 1:
+            return JSONResponse({"scene_id": all_scene_links[0]["scene_id"], "s3links": all_scene_links[0]["s3links"]})
         else:
-            return JSONResponse({"scene_links": [{"scene_id": s["scene_id"], "s3link": s["s3link"]} for s in scenes]})
+            return JSONResponse({"scene_links": all_scene_links})
     finally:
         cursor.close()
         conn.close()

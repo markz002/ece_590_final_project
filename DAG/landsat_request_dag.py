@@ -3,11 +3,10 @@ from airflow.operators.python import PythonOperator
 import pendulum
 from datetime import timedelta
 import os
-from my_noaa_api.Landsat_s3 import get_landsat_scenes, process_scene_assets
+# from my_noaa_api.Landsat_s3 import get_landsat_scenes, process_scene_assets
 import sys
 from itertools import product
-sys.path.append(os.path.join(os.path.dirname(__file__), '../my_noaa_api'))
-from my_noaa_api.app import parse_scene_id, save_landsat_scene
+from my_noaa_api.app import parse_scene_id, save_landsat_scene, get_landsat_scenes, process_scene_assets
 
 # --- Default args for the DAG ---
 default_args = {
