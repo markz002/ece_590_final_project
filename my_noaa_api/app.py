@@ -665,6 +665,7 @@ async def landsat_retrieve(
             import re
             import boto3
             from urllib.parse import urlparse
+            from botocore.client import Config
 
             # Parse S3 link to get bucket and prefix, including acquisition date
             parsed = urlparse(s3link)
@@ -679,16 +680,20 @@ async def landsat_retrieve(
             scene_id_prefix = s3link.split("/")[-1].split("_")[0]  # e.g. LC08_L2SR_200115_20161225_20201016_02_T2
 
             # List all objects in the prefix directory
-            s3 = boto3.client("s3")
+            s3 = boto3.client("s3", region_name="us-east-2", config=Config(signature_version="s3v4"))
             response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
             links = []
             if "Contents" in response:
                 for obj in response["Contents"]:
                     fname = obj["Key"].split("/")[-1]
                     if fname.startswith(scene_id_prefix):
-                        # Convert s3:// link to https:// link
-                        http_url = f"https://{bucket}.s3.amazonaws.com/{obj['Key']}"
-                        links.append(http_url)
+                        # Generate a presigned URL for each object
+                        presigned_url = s3.generate_presigned_url(
+                            "get_object",
+                            Params={"Bucket": bucket, "Key": obj["Key"]},
+                            ExpiresIn=3600  # valid for 1 hour
+                        )
+                        links.append(presigned_url)
             all_scene_links.append({"scene_id": scene_id, "download_links": links, "acquisition_date": prefix.rstrip("/").split("/")[-1]})
 
         # If only one scene, redirect to the first download link (for backward compatibility)
