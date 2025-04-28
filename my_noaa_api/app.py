@@ -3,7 +3,7 @@ import json
 import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, Header, HTTPException, Depends, Query
+from fastapi import FastAPI, Header, HTTPException, Depends, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
@@ -14,6 +14,8 @@ import uuid
 from pystac_client import Client
 from planetary_computer import sign
 import asyncio
+from datetime import datetime, timezone
+from Landsat_s3 import process_scene_assets, upload_to_s3_from_url, update_landsat_s3link
 
 # --- Configuration ---
 API_KEY_NAME = "X-API-Key"
@@ -94,13 +96,13 @@ def fetch_noaa_data(datasetid: str, startdate: str, enddate: str, limit: int = 2
         raise HTTPException(status_code=resp.status_code, detail=f"NOAA API error: {resp.text}")
     return resp.json()
 
-def log_request(user_id: str, endpoint: str, params: Dict[str, Any]):
+def log_request(user_email: str, endpoint: str, params: Dict[str, Any]):
     conn = get_db_conn()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO logs (user_id, request_type, dataset, timestamp, payload)
+        INSERT INTO logs (user_email, request_type, dataset, timestamp, payload)
         VALUES (%s, %s, %s, NOW(), %s)
-    """, (user_id, endpoint, params.get("datasetid"), json.dumps(params)))
+    """, (user_email, endpoint, params.get("datasetid"), json.dumps(params)))
     conn.commit()
     cursor.close()
     conn.close()
@@ -263,8 +265,34 @@ def save_landsat_scene(parsed: Dict[str, Any]) -> bool:
             cursor.close()
             conn.close()
 
-
-
+# --- Proper Logging Middleware ---
+@app.middleware("http")
+async def db_logging_middleware(request: Request, call_next):
+    endpoint = request.url.path
+    params = dict(request.query_params)
+    if endpoint == "/logs":
+        # Do not log /logs endpoint
+        return await call_next(request)
+    user_email = "anonymous"
+    try:
+        if hasattr(request, 'state') and hasattr(request.state, 'user') and request.state.user:
+            user_email = request.state.user.get("email", "anonymous")
+        else:
+            api_key = request.headers.get("x-api-key")
+            if api_key:
+                try:
+                    user = get_user_info(api_key)
+                    user_email = user.get("email", "anonymous")
+                except Exception:
+                    user_email = "unauthorized"
+    except Exception:
+        user_email = "anonymous"
+    try:
+        log_request(user_email, endpoint, params)
+    except Exception as e:
+        print(f"Log error: {e}")
+    response = await call_next(request)
+    return response
 
 # --- Exception Handlers ---
 @app.exception_handler(HTTPException)
@@ -284,7 +312,7 @@ async def get_noaa_data(
     limit: int = Query(25, ge=1, le=1000, description="Max records to return"),
     user=Depends(verify_api_key)
 ):
-    log_request(user["id"], "/noaa/data", {
+    log_request(user["email"], "/noaa/data", {
         "datasetid": datasetid,
         "startdate": startdate,
         "enddate": enddate,
@@ -364,7 +392,7 @@ async def create_user(user_data: CreateUserRequest):
 
 @app.get("/logs")
 async def get_logs(
-    user_id: Optional[str] = Query(None),
+    user_email: Optional[str] = Query(None),
     request_type: Optional[str] = Query(None),
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
@@ -374,9 +402,9 @@ async def get_logs(
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     query = "SELECT * FROM logs WHERE TRUE"
     params = []
-    if user_id:
-        query += " AND user_id = %s"
-        params.append(user_id)
+    if user_email:
+        query += " AND user_email = %s"
+        params.append(user_email)
     if request_type:
         query += " AND request_type = %s"
         params.append(request_type)
@@ -516,12 +544,79 @@ async def landsat_request(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching or uploading Landsat scenes: {str(e)}")
 
+@app.post("/landsat/dag_request")
+async def landsat_dag_request(
+    min_lon: float = Query(None, description="Minimum longitude (west)"),
+    min_lat: float = Query(None, description="Minimum latitude (south)"),
+    max_lon: float = Query(None, description="Maximum longitude (east)"),
+    max_lat: float = Query(None, description="Maximum longitude (north)"),
+    path: str = Query(None, description="WRS-2 path number"),
+    row: str = Query(None, description="WRS-2 row number"),
+    start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
+    end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
+    collection: str = Query("landsat-c2-l2", description="STAC collection name"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of items to return"),
+    user=Depends(verify_api_key)
+):
+    """
+    Trigger the Airflow DAG for Landsat request ingestion with the provided parameters using the Airflow v2 API.
+    """
+    airflow_url = "http://localhost:8080/api/v2/dags/landsat_request_dag/dagRuns"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    dag_run_id = f"landsat_request_{now_iso}"
+    payload = {
+        "dag_run_id": dag_run_id,
+        "logical_date": now_iso,
+        "conf": {
+            "min_lon": min_lon,
+            "min_lat": min_lat,
+            "max_lon": max_lon,
+            "max_lat": max_lat,
+            "path": path,
+            "row": row,
+            "start_date": start_date,
+            "end_date": end_date,
+            "collection": collection,
+            "limit": limit
+        },
+        "note": "Triggered via landsat_dag_request endpoint"
+    }
+    # --- Airflow OAuth2 Token Retrieval ---
+    airflow_api_url = os.getenv("AIRFLOW_URL", "http://localhost:8080")
+    airflow_user = os.getenv("AIRFLOW_USER", "admin")
+    airflow_pass = os.getenv("AIRFLOW_PASS", "dpRHnfWubMgtZ3F6")
+    token_endpoint = f"{airflow_api_url}/auth/token"
+    try:
+        token_resp = requests.post(token_endpoint, json={"username": airflow_user, "password": airflow_pass})
+        # if token_resp.status_code != 200:
+        #     raise HTTPException(status_code=500, detail=f"Failed to get Airflow token: {token_resp.text}")
+        try:        
+            token_json = token_resp.json()
+            airflow_token = token_json.get("access_token")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to get Airflow token: {str(e)}")
+        if not airflow_token:
+            raise HTTPException(status_code=500, detail="No access_token returned from Airflow /auth/token endpoint.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obtaining Airflow token: {str(e)}")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {airflow_token}"
+    }
+    try:
+        response = requests.post(airflow_url, json=payload, headers=headers)
+        if response.status_code not in (200, 201):
+            raise HTTPException(status_code=response.status_code, detail=f"Airflow DAG trigger failed: {response.text}")
+        return {"message": "DAG triggered successfully", "airflow_response": response.json()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to trigger Airflow DAG: {str(e)}")
+
 @app.get("/landsat/retrieve")
 async def landsat_retrieve(
     min_lon: float = Query(None, description="Minimum longitude (west)"),
     min_lat: float = Query(None, description="Minimum latitude (south)"),
     max_lon: float = Query(None, description="Maximum longitude (east)"),
-    max_lat: float = Query(None, description="Maximum latitude (north)"),
+    max_lat: float = Query(None, description="Maximum longitude (north)"),
     path: str = Query(None, description="WRS-2 path number"),
     row: str = Query(None, description="WRS-2 row number"),
     start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
