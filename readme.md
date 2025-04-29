@@ -29,9 +29,13 @@ ln -s [path_to_ece_590_final_project]/DAG ~/airflow/dags
 ln -s [path_to_ece_590_final_project]/my_noaa_api ./DAG/my_noaa_api
 ```
 
+These links will allow airflow to access the dag files and update promptly if any changes are made. 
+
 Run `airflow standalone` to start the airflow instance. Remember the password on its first startup.
 
 ## 4. FastAPI + Database Setup
+
+In app.py 
 
 run `python my_noaa_api/app.py` to start the server
 
@@ -45,6 +49,11 @@ The documentation can be found here:
 https://documenter.getpostman.com/view/24393444/2sB2j1jD2w
 
 Note that for development purposes, although we implementated authentication workflow, but we didn't actually check the api key for this release. You can optionally not provide the API key and will be identified as `anonymous`
+
+## 6. Cost Management
+
+The current setup is incurring a cost at around $2 a day, which translates to ~$700 annual cost. 
+
 
 
 
