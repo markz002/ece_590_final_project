@@ -41,7 +41,7 @@ conda-anaconda-tos @ file:///croot/conda-anaconda-tos_1739298990519/work
 conda-content-trust @ file:///croot/conda-content-trust_1714483159009/work
 conda-libmamba-solver @ file:///croot/conda-libmamba-solver_1737733694612/work/src
 conda-package-handling @ file:///croot/conda-package-handling_1731369017509/work
-conda_package_streaming @ file:///croot/conda-package-streaming_1731366181659/work
+conda-package-streaming @ file:///croot/conda-package-streaming_1731366181659/work
 cron-descriptor==1.4.5
 croniter==6.0.0
 cryptography @ file:///croot/cryptography_1732129644106/work
@@ -125,6 +125,7 @@ pystac-client==0.8.6
 python-daemon==3.1.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.0
+python-dotenv
 python-multipart==0.0.20
 python-slugify==8.0.4
 python3-saml==1.16.0

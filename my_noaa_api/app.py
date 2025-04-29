@@ -170,9 +170,9 @@ def execute_schema_sql():
         
         # Define the specific order for SQL files
         sql_files_order = [
-            # 'create_user_table.sql',
-            # 'create_logs_table.sql',
-            # 'create_metadata_table.sql',
+            'create_user_table.sql',
+            'create_logs_table.sql',
+            'create_metadata_table.sql',
             'create_meta_landsat.sql'
         ]
         

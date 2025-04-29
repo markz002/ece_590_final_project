@@ -8,10 +8,13 @@ import psycopg2
 from planetary_computer import sign
 import os
 from urllib.parse import urlparse
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # S3 configuration (recommended to use environment variables or IAM roles)
-S3_BUCKET = "590debucket"
-S3_PREFIX = "landsat_scenes"  # S3 storage prefix
+S3_BUCKET = os.getenv("S3_BUCKET", "590debucket")
+S3_PREFIX = os.getenv("S3_PREFIX", "landsat_scenes")  # Default only for prefix
 
 # --- Configure S3 client with short timeouts and retries ---
 s3_config = Config(
@@ -30,10 +33,10 @@ def get_db_conn():
     return psycopg2.connect(connect_timeout=5, **DB_CONFIG)
 
 DB_CONFIG = {
-    "host": "mydatabase.cpeqs8o8koho.us-east-2.rds.amazonaws.com",
-    "database": "postgres",
-    "user": "postgres",
-    "password": "590degroup5"
+    "host": os.getenv("DB_HOST", "mydatabase.cpeqs8o8koho.us-east-2.rds.amazonaws.com"),
+    "database": os.getenv("DB_NAME", "postgres"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD", "590degroup5")
 }
 
 

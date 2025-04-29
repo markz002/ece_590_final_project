@@ -16,6 +16,8 @@ In your EC2, or any environment you anticipate to run your service, clone the re
 
 Deploying this using airflow requires manually installing multiple packages, one can satisfy the environment by installing packages outlined in `requirements.txt` or running `pip install -r requirements.txt`
 
+The configuration files are mostly hard-coded in the code (not the best practice, but we did that for fast development). With the exception that the aws config are stored system wide, and cannot be distributed. One needs to run `aws configure` to set up the aws credentials. 
+
 ## 3. Airflow Setup
 
 Follow any guidelines and install the airflow version 3.0.0 (or any other compatible version using the version 2 api). Also, follow official guidelines to setup your aws credentials (if needed) because they will be used by the airflow to access the s3 bucket. 
@@ -29,9 +31,11 @@ ln -s [path_to_ece_590_final_project]/my_noaa_api ./DAG/my_noaa_api
 
 Run `airflow standalone` to start the airflow instance. Remember the password on its first startup.
 
-## 4. FastAPI Setup
+## 4. FastAPI + Database Setup
 
 run `python my_noaa_api/app.py` to start the server
+
+If tables are not created, run the app with `--setup-db` flag or set them up manually by executing the sql queries under `RDS_schema_code` directory
 
 
 ## 5. User our endpoints
