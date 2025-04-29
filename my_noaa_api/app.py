@@ -15,11 +15,14 @@ from pystac_client import Client
 from planetary_computer import sign
 import asyncio
 from datetime import datetime, timezone
+import dotenv
 try:
     from Landsat_s3 import process_scene_assets, upload_to_s3_from_url, update_landsat_s3link, get_landsat_scenes, get_landsat_scenes_bbox
 except:
     from my_noaa_api.Landsat_s3 import process_scene_assets, upload_to_s3_from_url, update_landsat_s3link, get_landsat_scenes, get_landsat_scenes_bbox 
 
+
+dotenv.load_dotenv()
 
 # --- Configuration ---
 API_KEY_NAME = "X-API-Key"
