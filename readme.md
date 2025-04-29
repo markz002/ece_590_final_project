@@ -12,4 +12,37 @@ The setup is conducted using AWS cloud console. While the exact setup script can
 
 ## 2. Environment Setup
 
+In your EC2, or any environment you anticipate to run your service, clone the repository.
+
 Deploying this using airflow requires manually installing multiple packages, one can satisfy the environment by installing packages outlined in `requirements.txt` or running `pip install -r requirements.txt`
+
+## 3. Airflow Setup
+
+Follow any guidelines and install the airflow version 3.0.0 (or any other compatible version using the version 2 api). Also, follow official guidelines to setup your aws credentials (if needed) because they will be used by the airflow to access the s3 bucket. 
+Prepare the dag files by running the following command:
+
+```bash
+cd [path_to_ece_590_final_project]
+ln -s [path_to_ece_590_final_project]/DAG ~/airflow/dags 
+ln -s [path_to_ece_590_final_project]/my_noaa_api ./DAG/my_noaa_api
+```
+
+Run `airflow standalone` to start the airflow instance. Remember the password on its first startup.
+
+## 4. FastAPI Setup
+
+run `python my_noaa_api/app.py` to start the server
+
+
+## 5. User our endpoints
+
+The documentation can be found here:
+
+https://documenter.getpostman.com/view/24393444/2sB2j1jD2w
+
+Note that for development purposes, although we implementated authentication workflow, but we didn't actually check the api key for this release. You can optionally not provide the API key and will be identified as `anonymous`
+
+
+
+
+
