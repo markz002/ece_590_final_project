@@ -643,80 +643,58 @@ async def landsat_retrieve(
     max_lat: float = Query(None, description="Maximum longitude (north)"),
     path: str = Query(None, description="WRS-2 path number"),
     row: str = Query(None, description="WRS-2 row number"),
+    bbox: str = Query(None, description="Bounding box as 'min_lon,min_lat,max_lon,max_lat' (optional, overrides min/max lon/lat)"),
     start_date: str = Query("2016-01-01", description="Start date in YYYY-MM-DD format"),
     end_date: str = Query("2016-12-31", description="End date in YYYY-MM-DD format"),
+    collection: str = Query("landsat-c2-l2", description="STAC collection name"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of items to return"),
     user=Depends(verify_api_key)
 ):
     """
-    Retrieve S3 links for Landsat scenes matching the query from the metadata database. Prioritize path/row if provided, else use bbox. If all scenes are found, redirect to their S3 links (multi-redirect JSON if >1).
+    Retrieve download links for Landsat scenes matching bbox or path/row. User must provide either bbox or both path and row.
     """
-    from itertools import product
     conn = get_db_conn()
-    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    cursor = conn.cursor()
     try:
-        scenes = []
-        # Prioritize path/row
-        if path is not None and row is not None:
-            query = """
-                SELECT scene_id, s3link FROM landsat_scenes
-                WHERE wrs_path = %s AND wrs_row = %s
-                AND acquisition_date >= %s AND acquisition_date <= %s
-            """
-            cursor.execute(query, (path, row, start_date, end_date))
-            rows = cursor.fetchall()
-            if not rows:
-                raise HTTPException(status_code=404, detail="No matching scenes found in metadata database.")
-            scenes = rows
-        elif None not in (min_lon, min_lat, max_lon, max_lat):
-            raise HTTPException(status_code=400, detail="BBox search not supported as landsat_scenes table does not have geometry columns.")
+        # If bbox is provided, override min/max lon/lat
+        if bbox:
+            parts = bbox.split(",")
+            if len(parts) == 4:
+                min_lon, min_lat, max_lon, max_lat = map(float, parts)
+            else:
+                raise HTTPException(status_code=400, detail="bbox must be in the format 'min_lon,min_lat,max_lon,max_lat'")
+        # Retrieve scenes using bbox or path/row
+        if None not in (min_lon, min_lat, max_lon, max_lat):
+            scenes = get_landsat_scenes_bbox(
+                min_lon=float(min_lon),
+                min_lat=float(min_lat),
+                max_lon=float(max_lon),
+                max_lat=float(max_lat),
+                start_date=start_date,
+                end_date=end_date,
+                collection=collection,
+                limit=limit
+            )
+        elif path is not None and row is not None:
+            scenes = get_landsat_scenes(
+                path=str(path),
+                row=str(row),
+                start_date=start_date,
+                end_date=end_date,
+                collection=collection,
+                limit=limit
+            )
         else:
-            raise HTTPException(status_code=400, detail="You must provide either path/row.")
-        # Check all scenes have s3link
-        missing = [s for s in scenes if not s.get("s3link")]
-        if missing:
-            raise HTTPException(status_code=404, detail="Some scenes are missing S3 links in metadata database.")
-        # For each scene, try to enumerate all S3 links using heuristics or external search
+            raise HTTPException(status_code=400, detail="You must provide either bbox or both path and row.")
         all_scene_links = []
-        for s in scenes:
-            scene_id = s["scene_id"]
-            s3link = s["s3link"]
-            # Heuristic: Instead of guessing band filenames, enumerate all files in the same S3 directory as the s3link
-            # and return all links that match the Landsat scene_id prefix.
-            import re
-            import boto3
-            from urllib.parse import urlparse
-            from botocore.client import Config
-
-            # Parse S3 link to get bucket and prefix, including acquisition date
-            parsed = urlparse(s3link)
-            print(s3link)
-            bucket = parsed.netloc or "590debucket"
-            # The prefix should include the acquisition date directory
-            # Example: .../path200/row115/2016-06-01/
-            prefix = parsed.path.lstrip("/").rsplit("/", 1)[0] + "/"
-
-            # Try to extract acquisition date from the prefix (assume it's the last part before the filename)
-            # If you want to be more robust, you can also get the date from the database if available
-            scene_id_prefix = s3link.split("/")[-1].split("_")[0]  # e.g. LC08_L2SR_200115_20161225_20201016_02_T2
-
-            # List all objects in the prefix directory
-            s3 = boto3.client("s3", region_name="us-east-2", config=Config(signature_version="s3v4"))
-            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        for scene in scenes:
+            scene_id = scene["id"]
             links = []
-            if "Contents" in response:
-                for obj in response["Contents"]:
-                    fname = obj["Key"].split("/")[-1]
-                    if fname.startswith(scene_id_prefix):
-                        # Generate a presigned URL for each object
-                        presigned_url = s3.generate_presigned_url(
-                            "get_object",
-                            Params={"Bucket": bucket, "Key": obj["Key"]},
-                            ExpiresIn=3600  # valid for 1 hour
-                        )
-                        links.append(presigned_url)
-            all_scene_links.append({"scene_id": scene_id, "download_links": links, "acquisition_date": prefix.rstrip("/").split("/")[-1]})
-
-        # If only one scene, redirect to the first download link (for backward compatibility)
+            for band, url in scene["assets"].items():
+                # Here you could add S3 presigned URL logic if needed
+                links.append(url)
+            all_scene_links.append({"scene_id": scene_id, "download_links": links, "acquisition_date": scene["properties"].get("datetime", "")})
+        # If only one scene, return just that scene's links
         if len(all_scene_links) == 1:
             return JSONResponse({"scene_id": all_scene_links[0]["scene_id"], "download_links": all_scene_links[0]["download_links"]})
         else:
